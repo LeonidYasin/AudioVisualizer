@@ -22,8 +22,8 @@ def generate_silent_spectrum(audio_path, background_path, output_silent_path, n_
 
             # ИСПОЛЬЗУЙТЕ ЭТОТ БЕЗОПАСНЫЙ ВАРИАНТ:
             with open(background_path, "rb") as f:
-            file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
-            bg_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
+                bg_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             if bg_img is None:
                 raise ValueError("Не удалось прочитать изображение")
             bg_height, bg_width, _ = bg_img.shape
