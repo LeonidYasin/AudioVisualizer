@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
@@ -17,6 +19,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.Keep
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import com.chaquo.python.Python
 import com.chaquo.python.PyException
 import com.chaquo.python.android.AndroidPlatform
@@ -174,6 +177,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun getDownloadsFolder(): File {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        } else {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        }
+    }
+
     private fun processVideo() {
         btnStart.isEnabled = false
         progressBar.visibility = View.VISIBLE
@@ -187,16 +198,22 @@ class MainActivity : AppCompatActivity() {
         
         // Временные файлы
         val tempVideoPath = File(cacheDir, "temp_video.avi").absolutePath
-        val finalVideoPath = File(
-            getExternalFilesDir(null), 
-            "Визуализация_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.mp4"
-        ).absolutePath
+        
+        // СОХРАНЯЕМ В DOWNLOADS
+        val downloadsDir = getDownloadsFolder()
+        if (!downloadsDir.exists()) {
+            downloadsDir.mkdirs()
+        }
+        
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val finalVideoPath = File(downloadsDir, "Визуализация_$timestamp.mp4").absolutePath
+        
         val bgPath = selectedBgFile?.absolutePath ?: ""
 
         Thread {
             try {
                 // ШАГ 1: Подготовка аудио
-                logMessage("🎬 [1/3] Подготовка аудио (FFmpeg)...")
+                logMessage("🎬 [1/3] Подготовка аудио...")
                 val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
                 val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
                 
@@ -210,13 +227,12 @@ class MainActivity : AppCompatActivity() {
                 logMessage("✅ Аудио подготовлено (${wavSize} КБ)")
 
                 // ШАГ 2: Python рендеринг
-                logMessage("🐍 [2/3] Рендеринг визуализации (Python)...")
+                logMessage("🐍 [2/3] Рендеринг визуализации...")
                 
                 val py = Python.getInstance()
                 val pyModule = py.getModule("visualizer")
                 
                 val startTime = System.currentTimeMillis()
-                // ИСПРАВЛЕНО: Получаем путь как строку
                 val resultPath = pyModule.callAttr(
                     "create_spectrum_video",
                     wavAudioPath, tempVideoPath, bgPath
@@ -224,22 +240,22 @@ class MainActivity : AppCompatActivity() {
                 
                 val renderTime = (System.currentTimeMillis() - startTime) / 1000
 
-                // Проверяем, что результат не "False" и файл существует
                 if (resultPath != "False") {
                     val tempFile = File(resultPath)
                     if (tempFile.exists()) {
                         val tempSize = tempFile.length() / (1024 * 1024)
-                        logMessage("✅ Рендеринг завершен за ${renderTime}с")
-                        logMessage("📊 Промежуточный файл: ${tempSize} МБ")
+                        logMessage("✅ Рендеринг за ${renderTime}с, промежуточный: ${tempSize} МБ")
 
-                        // ШАГ 3: Финальная сборка MP4
-                        logMessage("🎬 [3/3] Сборка MP4...")
+                        // ШАГ 3: МАКСИМАЛЬНОЕ СЖАТИЕ В MP4
+                        logMessage("🎬 [3/3] Сжатие MP4...")
                         
+                        // Оптимальные настройки для максимального сжатия при сохранении FullHD
                         val ffmpegMergeCmd = "-y -i \"$resultPath\" -i \"$inputAudioPath\" " +
                                 "-vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
-                                "-c:v libx264 -preset medium -crf 22 -pix_fmt yuv420p " +
-                                "-c:a aac -b:a 192k -shortest -movflags +faststart " +
-                                "-profile:v high -level 4.0 \"$finalVideoPath\""
+                                "-c:v libx264 -preset slow -crf 28 -pix_fmt yuv420p " +  // slow = лучшее сжатие, crf 28 = хорошее качество при малом размере
+                                "-c:a aac -b:a 128k -shortest -movflags +faststart " +
+                                "-profile:v high -level 4.0 -x264-params \"ref=5:bframes=5:b-adapt=2:direct=auto:me=umh:subme=8:trellis=2:weightb=1:analyse=all:deblock=-1,-1\" " +
+                                "\"$finalVideoPath\""
                         
                         com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
                             // Очистка временных файлов
@@ -249,20 +265,24 @@ class MainActivity : AppCompatActivity() {
                             if (session.returnCode.isValueSuccess) {
                                 val finalFile = File(finalVideoPath)
                                 val finalSize = finalFile.length() / (1024 * 1024)
+                                
                                 logMessage("\n🎉 ВИДЕО FULLHD ГОТОВО!")
                                 logMessage("📊 Размер: ${finalSize} МБ")
-                                logMessage("📁 Сохранено: ${finalFile.name}")
-                                logMessage("📂 Путь: $finalVideoPath")
+                                logMessage("📁 Папка: Downloads")
+                                logMessage("📂 Имя: ${finalFile.name}")
                                 
                                 runOnUiThread {
                                     Toast.makeText(
                                         this@MainActivity, 
-                                        "FullHD видео готово! ${finalSize} МБ", 
+                                        "✅ ${finalFile.name}\n${finalSize} МБ", 
                                         Toast.LENGTH_LONG
                                     ).show()
+                                    
+                                    // Открываем видео
+                                    openVideoFile(finalFile)
                                 }
                             } else {
-                                logMessage("❌ Ошибка сборки:\n${session.allLogsAsString}")
+                                logMessage("❌ Ошибка сборки")
                             }
                             endProcess()
                         }
@@ -271,7 +291,7 @@ class MainActivity : AppCompatActivity() {
                         endProcess()
                     }
                 } else {
-                    logMessage("❌ Python вернул ошибку (False)")
+                    logMessage("❌ Ошибка Python")
                     endProcess()
                 }
             } catch (e: PyException) {
@@ -279,11 +299,45 @@ class MainActivity : AppCompatActivity() {
                 e.printStackTrace()
                 endProcess()
             } catch (e: Exception) {
-                logMessage("\n💥 СИСТЕМНАЯ ОШИБКА:\n${Log.getStackTraceString(e)}")
+                logMessage("\n💥 ОШИБКА:\n${e.message}")
                 e.printStackTrace()
                 endProcess()
             }
         }.start()
+    }
+
+    private fun openVideoFile(videoFile: File) {
+        try {
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${packageName}.fileprovider",
+                videoFile
+            )
+            
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "video/mp4")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
+                logMessage("▶️ Видео открыто")
+            } else {
+                logMessage("⚠️ Нет плеера")
+                Toast.makeText(
+                    this,
+                    "Видео: ${videoFile.absolutePath}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } catch (e: Exception) {
+            logMessage("⚠️ Ошибка открытия")
+            Toast.makeText(
+                this,
+                "Видео в Downloads/${videoFile.name}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     private fun logMessage(message: String) {
