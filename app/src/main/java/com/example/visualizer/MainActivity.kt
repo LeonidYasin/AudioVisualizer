@@ -12,6 +12,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.Keep // ИСПРАВЛЕНО: Добавлен импорт для аннотации Keep
 import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
 import com.chaquo.python.PyException
@@ -39,7 +40,7 @@ class MainActivity : AppCompatActivity() {
     class PythonLogger(private val activity: MainActivity) {
         private val buffer = StringBuilder()
 
-        @keep // Защита от удаления оптимизатором ProGuard
+        @Keep // ИСПРАВЛЕНО: Аннотация теперь с большой буквы
         fun write(text: String) {
             buffer.append(text)
             val lines = buffer.toString().split("\n")
@@ -56,7 +57,8 @@ class MainActivity : AppCompatActivity() {
                 buffer.append(lines.last())
             }
         }
-        @keep
+        
+        @Keep // ИСПРАВЛЕНО: Аннотация теперь с большой буквы
         fun flush() {}
     }
 
@@ -124,8 +126,10 @@ class MainActivity : AppCompatActivity() {
             val py = Python.getInstance()
             val sys = py.getModule("sys")
             val logger = PythonLogger(this)
-            sys.set("stdout", logger)
-            sys.set("stderr", logger)
+            
+            // ИСПРАВЛЕНО: Вызываем __setattr__ через callAttr для динамического проксирования Java-объекта в Python
+            sys.callAttr("__setattr__", "stdout", logger)
+            sys.callAttr("__setattr__", "stderr", logger)
             logMessage("⚙️ Системный лог Python успешно подключен.")
             
             py.getModule("visualizer")
@@ -193,7 +197,6 @@ class MainActivity : AppCompatActivity() {
                 val py = Python.getInstance()
                 val pyModule = py.getModule("visualizer")
                 
-                // Скрипт будет работать, а все его print() автоматически побегут на экран
                 val isPythonSuccess = pyModule.callAttr(
                     "generate_silent_spectrum",
                     wavAudioPath, bgPath, silentVideoPath
@@ -246,7 +249,6 @@ class MainActivity : AppCompatActivity() {
         scrollToBottom()
     }
 
-    // Метод вывода чистых логов из недр Python (без дублирования системных меток времени)
     fun appendPythonLog(line: String) {
         tvGlobalStatus.append("🐍 >>> $line\n")
         scrollToBottom()
