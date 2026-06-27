@@ -12,7 +12,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.Keep // ИСПРАВЛЕНО: Добавлен импорт для аннотации Keep
+import androidx.annotation.Keep
 import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
 import com.chaquo.python.PyException
@@ -40,26 +40,30 @@ class MainActivity : AppCompatActivity() {
     class PythonLogger(private val activity: MainActivity) {
         private val buffer = StringBuilder()
 
-        @Keep // ИСПРАВЛЕНО: Аннотация теперь с большой буквы
+        @Keep
         fun write(text: String) {
-            buffer.append(text)
-            val lines = buffer.toString().split("\n")
-            if (lines.size > 1) {
-                for (i in 0 until lines.size - 1) {
-                    val line = lines[i]
-                    if (line.trim().isNotEmpty()) {
-                        activity.runOnUiThread {
-                            activity.appendPythonLog(line)
-                        }
+            // Корректно обрабатываем \r (используется в прогресс-барах типа tqdm) и \n
+            val processed = text.replace("\r", "\n")
+            buffer.append(processed)
+            
+            // Построчно выталкиваем данные из буфера в UI-поток
+            while (buffer.contains("\n")) {
+                val index = buffer.indexOf("\n")
+                val line = buffer.substring(0, index)
+                buffer.delete(0, index + 1)
+                
+                if (line.isNotBlank()) {
+                    activity.runOnUiThread {
+                        activity.appendPythonLog(line.trim())
                     }
                 }
-                buffer.setLength(0)
-                buffer.append(lines.last())
             }
         }
         
-        @Keep // ИСПРАВЛЕНО: Аннотация теперь с большой буквы
-        fun flush() {}
+        @Keep
+        fun flush() {
+            // Необходим для интерфейса sys.stdout/sys.stderr в Python
+        }
     }
 
     private val pickAudioLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -117,7 +121,7 @@ class MainActivity : AppCompatActivity() {
         tvGlobalStatus.setTextIsSelectable(true)
         logMessage("📱 Студия визуализации запущена.")
 
-        // Запуск Python и перенаправление потоков вывода
+        // Инициализация Python платформы
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
         }
@@ -127,7 +131,7 @@ class MainActivity : AppCompatActivity() {
             val sys = py.getModule("sys")
             val logger = PythonLogger(this)
             
-            // ИСПРАВЛЕНО: Вызываем __setattr__ через callAttr для динамического проксирования Java-объекта в Python
+            // Перенаправление стандартных потоков вывода Python в наш кастомный логер
             sys.callAttr("__setattr__", "stdout", logger)
             sys.callAttr("__setattr__", "stderr", logger)
             logMessage("⚙️ Системный лог Python успешно подключен.")
@@ -192,8 +196,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 runOnUiThread { logMessage("✅ Аудио подготовлено. Передача управления ядру Python.") }
-
                 runOnUiThread { logMessage("🐍 [2/3] Вызов Python-модуля (SciPy/OpenCV)...") }
+                
                 val py = Python.getInstance()
                 val pyModule = py.getModule("visualizer")
                 
