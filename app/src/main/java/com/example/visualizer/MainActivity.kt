@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
@@ -36,28 +38,16 @@ class MainActivity : AppCompatActivity() {
     private var selectedAudioFile: File? = null
     private var selectedBgFile: File? = null
 
+    // Буферы для троттлинга высокоинтенсивных логов из Python среды
+    private val pendingPythonLogs = StringBuilder()
+    private val uiHandler = Handler(Looper.getMainLooper())
+    @Volatile private var isLogUpdateScheduled = false
+
     // Класс перехвата стандартного вывода (print) из Python среды
     class PythonLogger(private val activity: MainActivity) {
-        private val buffer = StringBuilder()
-
         @Keep
         fun write(text: String) {
-            // Корректно обрабатываем \r (используется в прогресс-барах типа tqdm) и \n
-            val processed = text.replace("\r", "\n")
-            buffer.append(processed)
-            
-            // Построчно выталкиваем данные из буфера в UI-поток
-            while (buffer.contains("\n")) {
-                val index = buffer.indexOf("\n")
-                val line = buffer.substring(0, index)
-                buffer.delete(0, index + 1)
-                
-                if (line.isNotBlank()) {
-                    activity.runOnUiThread {
-                        activity.appendPythonLog(line.trim())
-                    }
-                }
-            }
+            activity.appendPythonLogThrottled(text)
         }
         
         @Keep
@@ -183,20 +173,18 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
-                runOnUiThread { logMessage("🎬 [1/3] Пережатие аудио в рабочий WAV Mono через FFmpeg...") }
+                logMessage("🎬 [1/3] Пережатие аудио в рабочий WAV Mono через FFmpeg...")
                 val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
                 val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
                 
                 if (!preSession.returnCode.isValueSuccess) {
-                    runOnUiThread {
-                        logMessage("❌ Сбой FFmpeg декодера:\n${preSession.allLogsAsString}")
-                        endProcess()
-                    }
+                    logMessage("❌ Сбой FFmpeg декодера:\n${preSession.allLogsAsString}")
+                    endProcess()
                     return@Thread
                 }
                 
-                runOnUiThread { logMessage("✅ Аудио подготовлено. Передача управления ядру Python.") }
-                runOnUiThread { logMessage("🐍 [2/3] Вызов Python-модуля (SciPy/OpenCV)...") }
+                logMessage("✅ Аудио подготовлено. Передача управления ядру Python.")
+                logMessage("🐍 [2/3] Вызов Python-модуля (SciPy/OpenCV)...")
                 
                 val py = Python.getInstance()
                 val pyModule = py.getModule("visualizer")
@@ -207,55 +195,107 @@ class MainActivity : AppCompatActivity() {
                 ).toBoolean()
 
                 if (isPythonSuccess) {
-                    runOnUiThread { logMessage("✅ Математический рендер кадров Python завершен.") }
-                    runOnUiThread { logMessage("🎬 [3/3] Сборка финального контейнера (FFmpeg мультиплексор)...") }
+                    logMessage("✅ Математический рендер кадров Python завершен.")
+                    logMessage("🎬 [3/3] Сборка финального контейнера (FFmpeg мультиплексор)...")
 
                     val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
                     
                     com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
-                        runOnUiThread {
-                            File(wavAudioPath).delete()
-                            File(silentVideoPath).delete()
-                            
-                            if (session.returnCode.isValueSuccess) {
-                                logMessage("\n🎉 ПРОЦЕСС ЗАВЕРШЕН УСПЕШНО!")
-                                logMessage("💾 Сохранено в память устройства:\n$finalVideoPath")
+                        File(wavAudioPath).delete()
+                        File(silentVideoPath).delete()
+                        
+                        if (session.returnCode.isValueSuccess) {
+                            logMessage("\n🎉 ПРОЦЕСС ЗАВЕРШЕН УСПЕШНО!")
+                            logMessage("💾 Сохранено в память устройства:\n$finalVideoPath")
+                            runOnUiThread {
                                 Toast.makeText(this@MainActivity, "Видео готово!", Toast.LENGTH_LONG).show()
-                            } else {
-                                logMessage("❌ Ошибка сборки контейнера:\n${session.allLogsAsString}")
                             }
-                            endProcess()
+                        } else {
+                            logMessage("❌ Ошибка сборки контейнера:\n${session.allLogsAsString}")
                         }
-                    }
-                } else {
-                    runOnUiThread {
-                        logMessage("❌ Скрипт Python вернул критический флаг False.")
                         endProcess()
                     }
+                } else {
+                    logMessage("❌ Скрипт Python вернул критический флаг False.")
+                    endProcess()
                 }
             } catch (e: PyException) {
-                runOnUiThread {
-                    logMessage("\n💥 ТРЕЙСБЕК ОШИБКИ ИЗ PYTHON СРЕДЫ:\n${e.message}")
-                    endProcess()
-                }
+                logMessage("\n💥 ТРЕЙСБЕК ОШИБКИ ИЗ PYTHON СРЕДЫ:\n${e.message}")
+                endProcess()
             } catch (e: Exception) {
-                runOnUiThread {
-                    logMessage("\n💥 СИСТЕМНАЯ ОШИБКА АНДРОИД:\n${Log.getStackTraceString(e)}")
-                    endProcess()
-                }
+                logMessage("\n💥 СИСТЕМНАЯ ОШИБКА АНДРОИД:\n${Log.getStackTraceString(e)}")
+                endProcess()
             }
         }.start()
     }
 
+    // Потокобезопасный метод добавления системных логов приложения
     private fun logMessage(message: String) {
-        val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        tvGlobalStatus.append("[$timeStamp] $message\n")
-        scrollToBottom()
+        runOnUiThread {
+            val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            tvGlobalStatus.append("[$timeStamp] $message\n")
+            trimLogBufferIfNeeded()
+            scrollToBottom()
+        }
     }
 
-    fun appendPythonLog(line: String) {
-        tvGlobalStatus.append("🐍 >>> $line\n")
-        scrollToBottom()
+    // Накопление интенсивных Python-логов во временный буфер (Троттлинг)
+    fun appendPythonLogThrottled(text: String) {
+        if (text.isEmpty()) return
+        
+        synchronized(pendingPythonLogs) {
+            // Заменяем возврат каретки \r на перевод строки \n для очистки tqdm обновлений
+            pendingPythonLogs.append(text.replace("\r", "\n"))
+        }
+
+        if (!isLogUpdateScheduled) {
+            isLogUpdateScheduled = true
+            // Планируем отправку на экран порциями раз в 250 миллисекунд
+            uiHandler.postDelayed({
+                flushPythonLogsToUI()
+            }, 250)
+        }
+    }
+
+    // Выгрузка пачки логов на экран в UI-потоке
+    private fun flushPythonLogsToUI() {
+        val chunk: String
+        synchronized(pendingPythonLogs) {
+            chunk = pendingPythonLogs.toString()
+            pendingPythonLogs.setLength(0)
+            isLogUpdateScheduled = false
+        }
+
+        if (chunk.isEmpty()) return
+
+        val lines = chunk.split("\n")
+        val formattedChunk = StringBuilder()
+
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.isNotEmpty()) {
+                // Защита от дублирования префикса
+                if (trimmed.startsWith("🐍 >>>")) {
+                    formattedChunk.append("$trimmed\n")
+                } else {
+                    formattedChunk.append("🐍 >>> $trimmed\n")
+                }
+            }
+        }
+
+        if (formattedChunk.isNotEmpty()) {
+            tvGlobalStatus.append(formattedChunk)
+            trimLogBufferIfNeeded()
+            scrollToBottom()
+        }
+    }
+
+    // Обрезка старых логов сверху, чтобы TextView не лагал от объема данных
+    private fun trimLogBufferIfNeeded() {
+        val currentText = tvGlobalStatus.text
+        if (currentText.length > 40000) { // Примерно 500-700 строк логов максимум
+            tvGlobalStatus.text = currentText.substring(currentText.length - 20000)
+        }
     }
 
     private fun scrollToBottom() {
@@ -265,9 +305,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun endProcess() {
-        btnStart.isEnabled = true
-        progressBar.visibility = View.GONE
-        logMessage("🏁 Поток обработки остановлен.")
+        runOnUiThread {
+            btnStart.isEnabled = true
+            progressBar.visibility = View.GONE
+            logMessage("🏁 Поток обработки остановлен.")
+        }
     }
 
     private fun getFileNameFromUri(uri: Uri): String {
