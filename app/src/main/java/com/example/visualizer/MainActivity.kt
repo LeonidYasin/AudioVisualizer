@@ -115,12 +115,13 @@ class MainActivity : AppCompatActivity() {
         tvGlobalStatus.setTextIsSelectable(true)
         logMessage("📱 Студия визуализации запущена.")
 
-        // Отслеживание скролла: определяет, читает ли юзер старые логи или находится внизу
+        // Отслеживание скролла: строго определяет положение каретки пользователя
         mainScrollView.viewTreeObserver.addOnScrollChangedListener {
             val child = mainScrollView.getChildAt(0)
             if (child != null) {
                 val maxScrollY = child.height - mainScrollView.height
-                // Если разница текущего скролла и дна менее 150px (или контент умещается целиком) -> автоскролл активен
+                // Если пользователь находится у самого низа (с допуском 150px), автоскролл активен. 
+                // Если отмотал вверх — автоскролл засыпает.
                 autoScrollEnabled = (maxScrollY - mainScrollView.scrollY) <= 150 || maxScrollY <= 0
             }
         }
@@ -135,14 +136,14 @@ class MainActivity : AppCompatActivity() {
             val sys = py.getModule("sys")
             val logger = PythonLogger(this)
             
-            // Перенаправление стандартных потоков вывода Python в наш кастомный логер
+            // Перенаправление стандартных потоков вывода Python в логер
             sys.callAttr("__setattr__", "stdout", logger)
             sys.callAttr("__setattr__", "stderr", logger)
             logMessage("⚙️ Системный лог Python успешно подключен.")
             
             py.getModule("visualizer")
         } catch (e: Exception) {
-            logMessage("⚠️ Ошибка初始化 скриптов: ${e.message}")
+            logMessage("⚠️ Ошибка инициализации скриптов: ${e.message}")
         }
 
         btnSelectAudio.setOnClickListener {
@@ -171,13 +172,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Обработка поворота экрана БЕЗ перезапуска Activity (использует текущие флаги автоскролла)
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (autoScrollEnabled) {
-            // Небольшая задержка, чтобы дать TextView перерасчитать новую геометрию и высоту строк
             mainScrollView.postDelayed({
-                mainScrollView.fullScroll(View.FOCUS_DOWN)
+                val child = mainScrollView.getChildAt(0)
+                if (child != null) {
+                    val lastPixelSpace = child.height - mainScrollView.height
+                    if (lastPixelSpace > 0) mainScrollView.scrollTo(0, lastPixelSpace)
+                }
             }, 200)
         }
     }
@@ -199,8 +202,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 logMessage("🎬 [1/3] Пережатие аудио в рабочий WAV Mono через FFmpeg...")
-                //val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
-                val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
+                val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
                 val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
                 
                 if (!preSession.returnCode.isValueSuccess) {
@@ -224,7 +226,8 @@ class MainActivity : AppCompatActivity() {
                     logMessage("✅ Математический рендер кадров Python завершен.")
                     logMessage("🎬 [3/3] Сборка финального контейнера (FFmpeg мультиплексор)...")
 
-                    val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
+                    // ИСПРАВЛЕНО: Добавлен фильтр масштабирования -vf для скругления нечетных разрешений (например, 1077 -> 1076)
+                    val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
                     
                     com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
                         File(wavAudioPath).delete()
@@ -260,7 +263,11 @@ class MainActivity : AppCompatActivity() {
             val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             tvGlobalStatus.append("[$timeStamp] $message\n")
             trimLogBufferIfNeeded()
-            scrollToBottom()
+            
+            // ИСПРАВЛЕНО: Задержка предохраняет от нежелательного выкидывания скролла вверх при смене этапов обработки
+            mainScrollView.postDelayed({
+                scrollToBottom()
+            }, 50)
         }
     }
 
@@ -318,9 +325,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scrollToBottom() {
-        if (autoScrollEnabled) {
-            mainScrollView.post {
-                mainScrollView.fullScroll(View.FOCUS_DOWN)
+        // ИСПРАВЛЕНО: Если флаг снят пользователем (просмотр старых ошибок) — автоскролл игнорируется намертво
+        if (!autoScrollEnabled) return
+
+        mainScrollView.post {
+            val child = mainScrollView.getChildAt(0)
+            if (child != null) {
+                val lastPixelSpace = child.height - mainScrollView.height
+                if (lastPixelSpace > 0) {
+                    mainScrollView.scrollTo(0, lastPixelSpace)
+                }
             }
         }
     }
