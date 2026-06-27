@@ -5,13 +5,13 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="16dp"
-    android:background="#F4F6F9">
-
-    <Button
+    android:background="#1E1E1E"> <Button
         android:id="@+id/btnSelectAudio"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Выбрать аудиофайл"
+        android:backgroundTint="#2D2D2D"
+        android:textColor="#E0E0E0"
         android:textAllCaps="false" />
 
     <TextView
@@ -22,7 +22,7 @@
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
         android:paddingBottom="8dp"
-        android:textColor="#5A6B7C"
+        android:textColor="#A0A0A0"
         android:textSize="13sp" />
 
     <Button
@@ -30,6 +30,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Выбрать фоновое изображение"
+        android:backgroundTint="#2D2D2D"
+        android:textColor="#E0E0E0"
         android:textAllCaps="false" />
 
     <TextView
@@ -40,7 +42,7 @@
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
         android:paddingBottom="12dp"
-        android:textColor="#5A6B7C"
+        android:textColor="#A0A0A0"
         android:textSize="13sp" />
 
     <Button
@@ -48,7 +50,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Запустить рендеринг спектра"
-        android:backgroundTint="#00E676"
+        android:backgroundTint="#00C853"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
         android:textAllCaps="false" />
@@ -61,8 +63,8 @@
         android:layout_marginBottom="8dp"
         android:indeterminate="true"
         android:visibility="gone"
-        app:trackColor="#E0E0E0"
-        app:indicatorColor="#00E676" />
+        app:trackColor="#333333"
+        app:indicatorColor="#00C853" />
 
     <ScrollView
         android:id="@+id/mainScrollView"
@@ -71,7 +73,7 @@
         android:layout_weight="1"
         android:layout_marginTop="8dp"
         android:background="#0C0C0C"
-        android:elevation="4dp"
+        android:elevation="0dp"
         android:padding="10dp">
 
         <TextView
