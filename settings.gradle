@@ -3,6 +3,8 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
+        // СЮДА: Чтобы Gradle знал, где искать сам плагин Chaquopy при сборке
+        maven { url "https://chaquo.com/maven" }
     }
 }
 dependencyResolutionManagement {
@@ -10,6 +12,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // ЗДЕСЬ: Чтобы Python-окружение знало, откуда качать нативные пакеты
         maven { url "https://chaquo.com/maven" }
     }
 }
