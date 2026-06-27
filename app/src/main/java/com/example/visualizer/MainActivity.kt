@@ -39,15 +39,11 @@ class MainActivity : AppCompatActivity() {
     private var selectedAudioFile: File? = null
     private var selectedBgFile: File? = null
 
-    // Буферы для троттлинга высокоинтенсивных логов из Python среды
     private val pendingPythonLogs = StringBuilder()
     private val uiHandler = Handler(Looper.getMainLooper())
     @Volatile private var isLogUpdateScheduled = false
-
-    // Интеллектуальный флаг автоскролла
     private var autoScrollEnabled = true
 
-    // Класс перехвата стандартного вывода (print) из Python среды
     class PythonLogger(private val activity: MainActivity) {
         @Keep
         fun write(text: String) {
@@ -55,9 +51,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         @Keep
-        fun flush() {
-            // Необходим для интерфейса sys.stdout/sys.stderr в Python
-        }
+        fun flush() {}
     }
 
     private val pickAudioLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -115,18 +109,14 @@ class MainActivity : AppCompatActivity() {
         tvGlobalStatus.setTextIsSelectable(true)
         logMessage("📱 Студия визуализации запущена.")
 
-        // Отслеживание скролла: строго определяет положение каретки пользователя
         mainScrollView.viewTreeObserver.addOnScrollChangedListener {
             val child = mainScrollView.getChildAt(0)
             if (child != null) {
                 val maxScrollY = child.height - mainScrollView.height
-                // Если пользователь находится у самого низа (с допуском 150px), автоскролл активен. 
-                // Если отмотал вверх — автоскролл засыпает.
                 autoScrollEnabled = (maxScrollY - mainScrollView.scrollY) <= 150 || maxScrollY <= 0
             }
         }
 
-        // Инициализация Python платформы
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
         }
@@ -136,7 +126,6 @@ class MainActivity : AppCompatActivity() {
             val sys = py.getModule("sys")
             val logger = PythonLogger(this)
             
-            // Перенаправление стандартных потоков вывода Python в логер
             sys.callAttr("__setattr__", "stdout", logger)
             sys.callAttr("__setattr__", "stderr", logger)
             logMessage("⚙️ Системный лог Python успешно подключен.")
@@ -190,73 +179,98 @@ class MainActivity : AppCompatActivity() {
         progressBar.visibility = View.VISIBLE
         
         logMessage("\n🚀 =========================================")
-        logMessage("🚀 ЗАПУСК СГЛАЖИВАНИЯ И МЕДИАРЕНДЕРА")
+        logMessage("🚀 ЗАПУСК ВИЗУАЛИЗАЦИИ FULLHD")
         logMessage("🚀 =========================================")
 
         val inputAudioPath = selectedAudioFile!!.absolutePath
         val wavAudioPath = File(cacheDir, "temp_mono.wav").absolutePath
-        // ИСПРАВЛЕНО: Используем MP4 вместо AVI для обхода лимита 2ГБ
-        val silentVideoPath = File(cacheDir, "silent_temp.mp4").absolutePath
-        val finalVideoPath = File(getExternalFilesDir(null), "Спектр_${System.currentTimeMillis()}.mp4").absolutePath
+        
+        // Временные файлы
+        val tempVideoPath = File(cacheDir, "temp_video.avi").absolutePath
+        val finalVideoPath = File(
+            getExternalFilesDir(null), 
+            "Визуализация_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.mp4"
+        ).absolutePath
         val bgPath = selectedBgFile?.absolutePath ?: ""
 
         Thread {
             try {
-                logMessage("🎬 [1/3] Пережатие аудио в рабочий WAV Mono через FFmpeg...")
+                // ШАГ 1: Подготовка аудио
+                logMessage("🎬 [1/3] Подготовка аудио (FFmpeg)...")
                 val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
                 val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
                 
                 if (!preSession.returnCode.isValueSuccess) {
-                    logMessage("❌ Сбой FFmpeg декодера:\n${preSession.allLogsAsString}")
+                    logMessage("❌ Сбой FFmpeg:\n${preSession.allLogsAsString}")
                     endProcess()
                     return@Thread
                 }
                 
-                logMessage("✅ Аудио подготовлено. Передача управления ядру Python.")
-                logMessage("🐍 [2/3] Вызов Python-модуля (SciPy/OpenCV)...")
+                val wavSize = File(wavAudioPath).length() / 1024
+                logMessage("✅ Аудио подготовлено (${wavSize} КБ)")
+
+                // ШАГ 2: Python рендеринг
+                logMessage("🐍 [2/3] Рендеринг визуализации (Python)...")
                 
                 val py = Python.getInstance()
                 val pyModule = py.getModule("visualizer")
                 
-                // ИСПРАВЛЕНО: Используем новое имя функции create_spectrum_video
-                val isPythonSuccess = pyModule.callAttr(
+                val startTime = System.currentTimeMillis()
+                val resultPath = pyModule.callAttr(
                     "create_spectrum_video",
-                    wavAudioPath, silentVideoPath, bgPath
-                ).toBoolean()
+                    wavAudioPath, tempVideoPath, bgPath
+                ).asString()
+                
+                val renderTime = (System.currentTimeMillis() - startTime) / 1000
 
-                if (isPythonSuccess) {
-                    logMessage("✅ Математический рендер кадров Python завершен.")
-                    logMessage("🎬 [3/3] Сборка финального контейнера (FFmpeg мультиплексор)...")
+                if (resultPath != "False" && File(resultPath).exists()) {
+                    val tempSize = File(resultPath).length() / (1024 * 1024)
+                    logMessage("✅ Рендеринг завершен за ${renderTime}с")
+                    logMessage("📊 Промежуточный файл: ${tempSize} МБ")
 
-                    // ИСПРАВЛЕНО: Добавлен фильтр масштабирования -vf для скругления нечетных разрешений
-                    val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" " +
+                    // ШАГ 3: Финальная сборка MP4 с оптимизацией
+                    logMessage("🎬 [3/3] Сборка MP4...")
+                    
+                    // Оптимальные настройки для FullHD с балансом качество/размер
+                    val ffmpegMergeCmd = "-y -i \"$resultPath\" -i \"$inputAudioPath\" " +
                             "-vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
-                            "-c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
+                            "-c:v libx264 -preset medium -crf 22 -pix_fmt yuv420p " +
+                            "-c:a aac -b:a 192k -shortest -movflags +faststart " +
+                            "-profile:v high -level 4.0 \"$finalVideoPath\""
                     
                     com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
+                        // Очистка временных файлов
                         File(wavAudioPath).delete()
-                        File(silentVideoPath).delete()
+                        File(resultPath).delete()
                         
                         if (session.returnCode.isValueSuccess) {
-                            logMessage("\n🎉 ПРОЦЕСС ЗАВЕРШЕН УСПЕШНО!")
-                            logMessage("💾 Сохранено в память устройства:\n$finalVideoPath")
+                            val finalSize = File(finalVideoPath).length() / (1024 * 1024)
+                            logMessage("\n🎉 ВИДЕО FULLHD ГОТОВО!")
+                            logMessage("📊 Размер: ${finalSize} МБ")
+                            logMessage("📁 Сохранено: ${File(finalVideoPath).name}")
+                            logMessage("📂 Путь: $finalVideoPath")
+                            
                             runOnUiThread {
-                                Toast.makeText(this@MainActivity, "Видео готово!", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    this@MainActivity, 
+                                    "FullHD видео готово! ${finalSize} МБ", 
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
                         } else {
-                            logMessage("❌ Ошибка сборки контейнера:\n${session.allLogsAsString}")
+                            logMessage("❌ Ошибка сборки:\n${session.allLogsAsString}")
                         }
                         endProcess()
                     }
                 } else {
-                    logMessage("❌ Скрипт Python вернул критический флаг False.")
+                    logMessage("❌ Python вернул ошибку или файл не создан")
                     endProcess()
                 }
             } catch (e: PyException) {
-                logMessage("\n💥 ТРЕЙСБЕК ОШИБКИ ИЗ PYTHON СРЕДЫ:\n${e.message}")
+                logMessage("\n💥 ОШИБКА PYTHON:\n${e.message}")
                 endProcess()
             } catch (e: Exception) {
-                logMessage("\n💥 СИСТЕМНАЯ ОШИБКА АНДРОИД:\n${Log.getStackTraceString(e)}")
+                logMessage("\n💥 СИСТЕМНАЯ ОШИБКА:\n${Log.getStackTraceString(e)}")
                 endProcess()
             }
         }.start()
@@ -267,10 +281,7 @@ class MainActivity : AppCompatActivity() {
             val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             tvGlobalStatus.append("[$timeStamp] $message\n")
             trimLogBufferIfNeeded()
-            
-            mainScrollView.postDelayed({
-                scrollToBottom()
-            }, 50)
+            mainScrollView.postDelayed({ scrollToBottom() }, 50)
         }
     }
 
@@ -345,7 +356,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             btnStart.isEnabled = true
             progressBar.visibility = View.GONE
-            logMessage("🏁 Поток обработки остановлен.")
+            logMessage("🏁 Обработка завершена.")
         }
     }
 
