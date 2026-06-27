@@ -167,7 +167,9 @@ class MainActivity : AppCompatActivity() {
 
         val inputAudioPath = selectedAudioFile!!.absolutePath
         val wavAudioPath = File(cacheDir, "temp_mono.wav").absolutePath
-        val silentVideoPath = File(cacheDir, "silent_temp.mp4").absolutePath
+        
+        // ИСПРАВЛЕНО: Изменено расширение на .avi для поддержки кодека MJPG в OpenCV
+        val silentVideoPath = File(cacheDir, "silent_temp.avi").absolutePath
         val finalVideoPath = File(getExternalFilesDir(null), "Спектр_${System.currentTimeMillis()}.mp4").absolutePath
         val bgPath = selectedBgFile?.absolutePath ?: ""
 
@@ -198,6 +200,7 @@ class MainActivity : AppCompatActivity() {
                     logMessage("✅ Математический рендер кадров Python завершен.")
                     logMessage("🎬 [3/3] Сборка финального контейнера (FFmpeg мультиплексор)...")
 
+                    // FFmpeg без проблем пережмет входящий MJPEG AVI в итоговый H.264 MP4
                     val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
                     
                     com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
@@ -229,7 +232,6 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    // Потокобезопасный метод добавления системных логов приложения
     private fun logMessage(message: String) {
         runOnUiThread {
             val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -239,25 +241,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Накопление интенсивных Python-логов во временный буфер (Троттлинг)
     fun appendPythonLogThrottled(text: String) {
         if (text.isEmpty()) return
         
         synchronized(pendingPythonLogs) {
-            // Заменяем возврат каретки \r на перевод строки \n для очистки tqdm обновлений
             pendingPythonLogs.append(text.replace("\r", "\n"))
         }
 
         if (!isLogUpdateScheduled) {
             isLogUpdateScheduled = true
-            // Планируем отправку на экран порциями раз в 250 миллисекунд
             uiHandler.postDelayed({
                 flushPythonLogsToUI()
             }, 250)
         }
     }
 
-    // Выгрузка пачки логов на экран в UI-потоке
     private fun flushPythonLogsToUI() {
         val chunk: String
         synchronized(pendingPythonLogs) {
@@ -274,7 +272,6 @@ class MainActivity : AppCompatActivity() {
         for (line in lines) {
             val trimmed = line.trim()
             if (trimmed.isNotEmpty()) {
-                // Защита от дублирования префикса
                 if (trimmed.startsWith("🐍 >>>")) {
                     formattedChunk.append("$trimmed\n")
                 } else {
@@ -290,10 +287,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Обрезка старых логов сверху, чтобы TextView не лагал от объема данных
     private fun trimLogBufferIfNeeded() {
         val currentText = tvGlobalStatus.text
-        if (currentText.length > 40000) { // Примерно 500-700 строк логов максимум
+        if (currentText.length > 40000) {
             tvGlobalStatus.text = currentText.substring(currentText.length - 20000)
         }
     }

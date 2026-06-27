@@ -6,7 +6,7 @@ from scipy.signal import stft
 import sys
 import builtins
 
-# Исправление буферизации: переопределяем print, чтобы он мгновенно проталкивал логи в Android
+# Исправление буферизации для мгновенного проталкивания логов в Android UI
 def print(*args, **kwargs):
     kwargs['flush'] = True
     builtins.print(*args, **kwargs)
@@ -17,15 +17,12 @@ def generate_silent_spectrum(audio_path, background_path, output_silent_path, n_
         
         # 1. Настройка графической сцены
         if background_path and os.path.exists(background_path):
-            # ВМЕСТО ЭТОГО КОДА В visualizer.py:
-            # bg_img = cv2.imread(background_path)
-
-            # ИСПОЛЬЗУЙТЕ ЭТОТ БЕЗОПАСНЫЙ ВАРИАНТ:
+            # Безопасное побайтовое чтение изображения для Android хранилища
             with open(background_path, "rb") as f:
                 file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
                 bg_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             if bg_img is None:
-                raise ValueError("Не удалось прочитать изображение")
+                raise ValueError("Не удалось декодировать фоновое изображение через cv2.imdecode")
             bg_height, bg_width, _ = bg_img.shape
         else:
             bg_width, bg_height = 1280, 720
@@ -69,8 +66,13 @@ def generate_silent_spectrum(audio_path, background_path, output_silent_path, n_
         final_background[:] = (15, 10, 25)
         final_background[0:bg_height, 0:bg_width] = bg_img
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # ИСПРАВЛЕНО: Используем нативный для OpenCV на Android кодек MJPG
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
         out = cv2.VideoWriter(output_silent_path, fourcc, fps, (new_width, new_height))
+
+        # Важная проверка: падать сразу, если девайс вывода не открылся
+        if not out.isOpened():
+            raise RuntimeError(f"OpenCV не смог открыть VideoWriter. Кодек MJPG недоступен или путь неверен: {output_silent_path}")
 
         def get_neon_color(norm_val):
             r = int(130 + (255 - 130) * norm_val)
@@ -81,7 +83,6 @@ def generate_silent_spectrum(audio_path, background_path, output_silent_path, n_
         print(f"🐍 >>> Начинается рендеринг видео. Всего кадров: {n_frames}")
         
         for frame_idx in range(n_frames):
-            # Периодически отправляем шаг прогресса в консоль (каждые 20 кадров, чтобы не спамить UI поток)
             if frame_idx % 20 == 0 or frame_idx == n_frames - 1:
                 print(f"🐍 >>> Обработка: кадр {frame_idx + 1}/{n_frames} ({int((frame_idx + 1) / n_frames * 100)}%)")
 
