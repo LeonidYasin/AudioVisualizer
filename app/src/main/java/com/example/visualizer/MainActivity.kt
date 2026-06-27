@@ -216,26 +216,26 @@ class MainActivity : AppCompatActivity() {
                 val pyModule = py.getModule("visualizer")
                 
                 val startTime = System.currentTimeMillis()
-                // ИСПРАВЛЕНО: Используем toBoolean() вместо asString()
-                val isPythonSuccess = pyModule.callAttr(
+                // ИСПРАВЛЕНО: Получаем путь как строку
+                val resultPath = pyModule.callAttr(
                     "create_spectrum_video",
                     wavAudioPath, tempVideoPath, bgPath
-                ).toBoolean()
+                ).toString()
                 
                 val renderTime = (System.currentTimeMillis() - startTime) / 1000
 
-                if (isPythonSuccess) {
-                    // ИСПРАВЛЕНО: Проверяем существование файла напрямую
-                    val tempFile = File(tempVideoPath)
+                // Проверяем, что результат не "False" и файл существует
+                if (resultPath != "False") {
+                    val tempFile = File(resultPath)
                     if (tempFile.exists()) {
                         val tempSize = tempFile.length() / (1024 * 1024)
                         logMessage("✅ Рендеринг завершен за ${renderTime}с")
                         logMessage("📊 Промежуточный файл: ${tempSize} МБ")
 
-                        // ШАГ 3: Финальная сборка MP4 с оптимизацией
+                        // ШАГ 3: Финальная сборка MP4
                         logMessage("🎬 [3/3] Сборка MP4...")
                         
-                        val ffmpegMergeCmd = "-y -i \"$tempVideoPath\" -i \"$inputAudioPath\" " +
+                        val ffmpegMergeCmd = "-y -i \"$resultPath\" -i \"$inputAudioPath\" " +
                                 "-vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
                                 "-c:v libx264 -preset medium -crf 22 -pix_fmt yuv420p " +
                                 "-c:a aac -b:a 192k -shortest -movflags +faststart " +
@@ -267,11 +267,11 @@ class MainActivity : AppCompatActivity() {
                             endProcess()
                         }
                     } else {
-                        logMessage("❌ Python сообщил об успехе, но файл не найден: $tempVideoPath")
+                        logMessage("❌ Файл не найден: $resultPath")
                         endProcess()
                     }
                 } else {
-                    logMessage("❌ Python вернул ошибку")
+                    logMessage("❌ Python вернул ошибку (False)")
                     endProcess()
                 }
             } catch (e: PyException) {
