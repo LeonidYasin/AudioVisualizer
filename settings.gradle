@@ -3,7 +3,6 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
-        // СЮДА: Чтобы Gradle знал, где искать сам плагин Chaquopy при сборке
         maven { url "https://chaquo.com/maven" }
     }
 }
@@ -12,8 +11,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // ЗДЕСЬ: Чтобы Python-окружение знало, откуда качать нативные пакеты
         maven { url "https://chaquo.com/maven" }
+        // СЮДА: Подключаем публичный архив оригинальных сборок FFmpegKit
+        maven { url "https://artifactory.appodeal.com/appodeal-public/" }
     }
 }
 rootProject.name = "AudioVisualizer"

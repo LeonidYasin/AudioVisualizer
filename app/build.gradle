@@ -53,6 +53,6 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
     
-    // ИСПРАВЛЕНО: Указана корректная LTS-версия для Maven Central
-    implementation 'com.arthenica:ffmpeg-kit-full-gpl:6.0.LTS'
+    // ИСПРАВЛЕНО: Аутентичная Full-GPL сборка из подключенного зеркала
+    implementation 'com.arthenica:ffmpeg-kit-full-gpl:6.0-2.LTS'
 }
