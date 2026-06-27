@@ -41,7 +41,8 @@ chaquopy {
         version = "3.11"
         pip {
             install "numpy"
-            install "opencv-python-headless"
+            // ИСПРАВЛЕНО: Используем официальную Android-сборку OpenCV
+            install "opencv-python"
             install "librosa"
             install "soundfile"
         }
