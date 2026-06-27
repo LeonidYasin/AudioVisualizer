@@ -199,7 +199,8 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 logMessage("🎬 [1/3] Пережатие аудио в рабочий WAV Mono через FFmpeg...")
-                val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
+                //val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
+                val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
                 val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
                 
                 if (!preSession.returnCode.isValueSuccess) {
