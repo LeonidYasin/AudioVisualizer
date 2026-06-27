@@ -38,7 +38,7 @@ android {
 // ИСПРАВЛЕНО: Новый официальный синтаксис Chaquopy 17.0.0+
 chaquopy {
     defaultConfig {
-        version = "3.11"
+        version = "3.10"
         pip {
             install "numpy"
             // ИСПРАВЛЕНО: Используем официальную Android-сборку OpenCV
