@@ -6,7 +6,7 @@ from scipy.signal import stft
 import sys
 import builtins
 
-# Исправление буферизации для мгновенного проталкивания логов в Android UI
+# Исправление буферизации для мгновного проталкивания логов в Android UI
 def print(*args, **kwargs):
     kwargs['flush'] = True
     builtins.print(*args, **kwargs)
@@ -14,54 +14,47 @@ def print(*args, **kwargs):
 def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps=30, n_bars=50):
     """
     Создает видео визуализации спектра на основе WAV-файла.
-    Использует SciPy для анализа и OpenCV для отрисовки.
-    FullHD качество, оптимизировано для экономии памяти.
+    Возвращает путь к созданному файлу или False в случае ошибки.
     """
     try:
         print("🐍 >>> Python-модуль запущен успешно.")
         
-        # 1. Загрузка аудио (WAV подготавливается на стороне Kotlin через FFmpeg)
+        # 1. Загрузка аудио
         print(f"🐍 >>> Загрузка аудио: {os.path.basename(audio_wav_path)}")
         sample_rate, data = wavfile.read(audio_wav_path)
         if len(data.shape) > 1:
-            data = data[:, 0]  # Преобразование в моно, если файл стерео
+            data = data[:, 0]
 
         duration = len(data) / sample_rate
         n_frames = int(duration * fps)
         print(f"🐍 >>> Длительность: {duration:.1f}с, Кадров: {n_frames}")
 
-        # 2. Математический анализ спектра (STFT) с оптимизацией
+        # 2. Расчет спектрограммы
         nperseg = sample_rate // fps
-        noverlap = nperseg // 2  # 50% перекрытие для плавности
+        noverlap = nperseg // 2
         print(f"🐍 >>> Расчет спектрограммы STFT...")
         f, t, Zxx = stft(data, fs=sample_rate, nperseg=nperseg, noverlap=noverlap)
         
-        # Освобождаем память от оригинальных данных
         del data
         
-        # Берем амплитуду и ограничиваем частоты (до 2000 Гц)
         Zxx = np.abs(Zxx)
-        freq_limit = 2000  # Гц
+        freq_limit = 2000
         freq_idx = np.where(f <= freq_limit)[0]
         if len(freq_idx) > 0:
             Zxx = Zxx[:freq_idx[-1] + 1, :]
         
-        # Группируем частоты по барам
         bars_chunks = np.array_split(Zxx, n_bars, axis=0)
         bars_data = np.array([np.mean(chunk, axis=0) for chunk in bars_chunks])
         
-        # Освобождаем память от спектрограммы
         del Zxx
         
-        # Логарифмическая нормализация
         bars_data = np.log1p(bars_data)
         if np.max(bars_data) > 0:
             bars_data = bars_data / np.max(bars_data)
         
-        # 3. FULLHD графика (без потери качества)
-        width, height = 1920, 1080  # FullHD
+        # 3. FULLHD графика
+        width, height = 1920, 1080
         
-        # Безопасное чтение фонового изображения
         if background_path and os.path.exists(background_path):
             try:
                 with open(background_path, "rb") as f:
@@ -78,15 +71,15 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
             bg_image = np.zeros((height, width, 3), dtype=np.uint8)
             bg_image[:] = (15, 15, 15)
 
-        # 4. Инициализация VideoWriter - пробуем разные кодеки
+        # 4. Инициализация VideoWriter
         out = None
         codecs_to_try = [
-            ('avc1', '.mp4'),   # H.264 для MP4 (компактный)
-            ('mp4v', '.mp4'),   # MPEG-4 для MP4
-            ('X264', '.mp4'),   # Другой вариант H.264
+            ('avc1', '.mp4'),
+            ('mp4v', '.mp4'),
+            ('X264', '.mp4'),
+            ('MJPG', '.avi'),
         ]
         
-        # Сначала пробуем MP4 кодеки
         for codec, ext in codecs_to_try:
             fourcc = cv2.VideoWriter_fourcc(*codec)
             test_path = output_path
@@ -107,33 +100,20 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
                     out.release()
                     out = None
         
-        # Если MP4 не работает, пробуем AVI (но с MJPG для экономии места)
-        if out is None:
-            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            test_path = output_path.rsplit('.', 1)[0] + '.avi'
-            out = cv2.VideoWriter(test_path, fourcc, fps, (width, height))
-            if out.isOpened():
-                print(f"🐍 >>> Используется кодек: MJPG (AVI), файл: {os.path.basename(test_path)}")
-                output_path = test_path
-            else:
-                out.release()
-                out = None
-        
         if out is None:
             print("❌ Ошибка: Не удалось инициализировать OpenCV VideoWriter!")
-            return False
+            return "False"
 
         print(f"🎬 Начинается рендеринг {n_frames} кадров FullHD...")
 
-        # 5. Основной цикл отрисовки кадров
+        # 5. Основной цикл
         bar_w = width // n_bars
-        max_bar_h = 450  # Фиксированная высота для FullHD
+        max_bar_h = 450
+        y_base = height - 30
         
-        # Предварительная компиляция цветов (оптимизация)
         color_cache = {}
         
         def get_neon_color(norm_val):
-            # Кэширование цветов для ускорения
             key = int(norm_val * 100)
             if key in color_cache:
                 return color_cache[key]
@@ -145,12 +125,9 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
             color_cache[key] = color
             return color
 
-        # Предварительное выделение памяти для кадра
         frame_template = bg_image.copy()
-        y_base = height - 30  # Отступ снизу
         
         for i in range(n_frames):
-            # Копируем шаблон (быстрее чем создание нового)
             frame = frame_template.copy()
             
             if i < bars_data.shape[1]:
@@ -171,7 +148,6 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
 
             out.write(frame)
 
-            # Вывод прогресса (реже для экономии CPU)
             if i % 60 == 0 or i == n_frames - 1:
                 percent = int(((i + 1) / n_frames) * 100)
                 print(f"🐍 >>> Прогресс: {percent}% ({i + 1}/{n_frames} кадров)")
@@ -179,7 +155,6 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
         # 6. Завершение
         out.release()
         
-        # Освобождаем память
         del frame_template
         del bg_image
         del bars_data
@@ -189,11 +164,11 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
         print(f"🐍 >>> Визуализация завершена! Размер: {file_size_mb:.1f} МБ")
         print(f"🐍 >>> Файл: {output_path}")
         
-        # Возвращаем путь к файлу для Kotlin
+        # ВОЗВРАЩАЕМ ПУТЬ К ФАЙЛУ
         return output_path
         
     except Exception as e:
         print(f"🐍 >>> Ошибка: {str(e)}")
         import traceback
         traceback.print_exc()
-        return False
+        return "False"
