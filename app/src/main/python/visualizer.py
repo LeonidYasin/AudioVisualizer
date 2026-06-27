@@ -1,6 +1,3 @@
-Да, я вижу, что в новой версии потеряны некоторые важные элементы. Вот полная версия с объединением всех исправлений:
-
-```python
 import os
 import numpy as np
 import cv2
@@ -37,11 +34,14 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
         
         # Берем амплитуду и ограничиваем частоты (до 2000 Гц для наглядности басов)
         Zxx = np.abs(Zxx)
-        freq_limit = np.where(f > 2000)
-        Zxx = Zxx[:freq_limit[0][0], :]
+        # ИСПРАВЛЕНО: корректное ограничение частот
+        freq_limit = 2000  # Гц
+        freq_idx = np.where(f <= freq_limit)[0]
+        if len(freq_idx) > 0:
+            Zxx = Zxx[:freq_idx[-1] + 1, :]
         
         # Группируем частоты по барам (столбикам)
-        bars_chunks = np.array_split(Zxx, n_bars)
+        bars_chunks = np.array_split(Zxx, n_bars, axis=0)
         bars_data = np.array([np.mean(chunk, axis=0) for chunk in bars_chunks])
         
         # Логарифмическая нормализация для "прыгучести"
@@ -71,15 +71,15 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
             bg_image[:] = (15, 15, 15)  # Темно-серый фон
 
         # 4. Инициализация VideoWriter (MP4 контейнер для обхода лимита 2ГБ)
-        # Используем 'mp4v' (или 'avc1'), которые стабильно работают в Chaquopy
+        # Используем 'mp4v', который стабильно работает в Chaquopy
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         if not out.isOpened():
-            print("❌ Ошибка: Не удалось инициализировать OpenCV VideoWriter!", flush=True)
+            print("❌ Ошибка: Не удалось инициализировать OpenCV VideoWriter!")
             return False
 
-        print(f"🎬 Начинается рендеринг {n_frames} кадров...", flush=True)
+        print(f"🎬 Начинается рендеринг {n_frames} кадров...")
 
         # 5. Основной цикл отрисовки кадров
         bar_w = width // n_bars
@@ -99,7 +99,7 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
                 
                 for b in range(n_bars):
                     # Вычисляем высоту столбика
-                    val = current_frame_data[b] if b < len(current_frame_data) else 0
+                    val = current_frame_data[b] if b < len(current_frame_data) else 0.0
                     h = int(val * max_bar_h) + 10
                     
                     # Рисуем столбик (неоновый цвет)
@@ -117,11 +117,11 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
             # Вывод прогресса для перехвата в Android UI
             if i % 30 == 0 or i == n_frames - 1:
                 percent = int(((i + 1) / n_frames) * 100)
-                print(f"🐍 >>> Обработка: кадр {i + 1}/{n_frames} ({percent}%)", flush=True)
+                print(f"🐍 >>> Обработка: кадр {i + 1}/{n_frames} ({percent}%)")
 
         # 6. Завершение
         out.release()
-        print("🐍 >>> Визуализация SciPy/OpenCV успешно завершена!", flush=True)
+        print("🐍 >>> Визуализация SciPy/OpenCV успешно завершена!")
         return True
         
     except Exception as e:
@@ -129,17 +129,3 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
         import traceback
         traceback.print_exc()
         return False
-```
-
-Что было восстановлено и объединено:
-
-1. Перехват print() - функция переопределения print с принудительным flush=True
-2. Безопасное чтение изображений - через open() + np.frombuffer + cv2.imdecode
-3. Обработка ошибок - try/except с детальным логированием
-4. Неоновые цвета - функция get_neon_color() для красивой визуализации
-5. Проверка VideoWriter - out.isOpened() с понятным сообщением об ошибке
-6. Корректный подсчет прогресса - percent с i+1 для правильного отображения 100%
-7. MP4 контейнер - fourcc = cv2.VideoWriter_fourcc(*'mp4v') для обхода лимита 2GB
-8. Traceback - для детальной отладки ошибок
-
-Теперь это полная, готовая к использованию версия со всеми исправлениями!
