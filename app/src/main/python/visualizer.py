@@ -6,7 +6,7 @@ from scipy.signal import stft
 import sys
 import builtins
 
-# Исправление буферизации для мгновного проталкивания логов в Android UI
+# Исправление буферизации для мгновенного проталкивания логов в Android UI
 def print(*args, **kwargs):
     kwargs['flush'] = True
     builtins.print(*args, **kwargs)
@@ -71,36 +71,11 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
             bg_image = np.zeros((height, width, 3), dtype=np.uint8)
             bg_image[:] = (15, 15, 15)
 
-        # 4. Инициализация VideoWriter
-        out = None
-        codecs_to_try = [
-            ('avc1', '.mp4'),
-            ('mp4v', '.mp4'),
-            ('X264', '.mp4'),
-            ('MJPG', '.avi'),
-        ]
+        # 4. Инициализация VideoWriter - используем MJPG для AVI
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
         
-        for codec, ext in codecs_to_try:
-            fourcc = cv2.VideoWriter_fourcc(*codec)
-            test_path = output_path
-            if not test_path.endswith(ext):
-                test_path = test_path.rsplit('.', 1)[0] + ext
-            
-            try:
-                out = cv2.VideoWriter(test_path, fourcc, fps, (width, height))
-                if out.isOpened():
-                    print(f"🐍 >>> Используется кодек: {codec}, файл: {os.path.basename(test_path)}")
-                    output_path = test_path
-                    break
-                else:
-                    out.release()
-                    out = None
-            except:
-                if out is not None:
-                    out.release()
-                    out = None
-        
-        if out is None:
+        if not out.isOpened():
             print("❌ Ошибка: Не удалось инициализировать OpenCV VideoWriter!")
             return "False"
 
@@ -127,6 +102,9 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
 
         frame_template = bg_image.copy()
         
+        # Переменная для отслеживания последнего выведенного процента
+        last_percent = -1
+        
         for i in range(n_frames):
             frame = frame_template.copy()
             
@@ -148,9 +126,11 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
 
             out.write(frame)
 
-            if i % 60 == 0 or i == n_frames - 1:
-                percent = int(((i + 1) / n_frames) * 100)
-                print(f"🐍 >>> Прогресс: {percent}% ({i + 1}/{n_frames} кадров)")
+            # Компактный вывод прогресса: только проценты
+            percent = int(((i + 1) / n_frames) * 100)
+            if percent != last_percent and percent % 5 == 0:  # Каждые 5%
+                print(f"🐍 >>> {percent}%")
+                last_percent = percent
 
         # 6. Завершение
         out.release()
@@ -161,10 +141,9 @@ def create_spectrum_video(audio_wav_path, output_path, background_path=None, fps
         color_cache.clear()
         
         file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-        print(f"🐍 >>> Визуализация завершена! Размер: {file_size_mb:.1f} МБ")
+        print(f"🐍 >>> Готово! Размер: {file_size_mb:.1f} МБ")
         print(f"🐍 >>> Файл: {output_path}")
         
-        # ВОЗВРАЩАЕМ ПУТЬ К ФАЙЛУ
         return output_path
         
     except Exception as e:
