@@ -83,45 +83,70 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ... верхние импорты и методы onCreate остаются без изменений ...
+
     private fun processVideo() {
-        // Переключаем элементы интерфейса в режим загрузки
         btnStart.isEnabled = false
         progressBar.visibility = View.VISIBLE
-        tvGlobalStatus.text = "Шаг 1 из 2: Генерация видеоряда (Python)..."
+        tvGlobalStatus.text = "Шаг 1 из 3: Декодирование аудио (FFmpeg)..."
 
+        val inputAudioPath = selectedAudioFile!!.absolutePath
+        // Временный аудиофайл, который без проблем прочитает SciPy
+        val wavAudioPath = File(cacheDir, "temp_mono.wav").absolutePath
         val silentVideoPath = File(cacheDir, "silent_temp.mp4").absolutePath
         val finalVideoPath = File(getExternalFilesDir(null), "Спектр_${System.currentTimeMillis()}.mp4").absolutePath
         val bgPath = selectedBgFile?.absolutePath ?: ""
 
         Thread {
             try {
+                // ЭТАП 1: Быстрое нативное пережатие любого формата в чистый WAV Mono 22kHz
+                val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
+                val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
+                
+                if (!preSession.returnCode.isValueSuccess) {
+                    runOnUiThread {
+                        progressBar.visibility = View.GONE
+                        btnStart.isEnabled = true
+                        tvGlobalStatus.text = "Ошибка оптимизации аудио для Python."
+                    }
+                    return@Thread
+                }
+
+                // ЭТАП 2: Передача WAV-файла в Python для создания анимации
+                runOnUiThread {
+                    tvGlobalStatus.text = "Шаг 2 из 3: Математический анализ и рендеринг (SciPy)..."
+                }
                 val py = Python.getInstance()
                 val pyModule = py.getModule("visualizer")
                 
-                // Вызов метода питона для отрисовки фреймов
                 val isPythonSuccess = pyModule.callAttr(
                     "generate_silent_spectrum",
-                    selectedAudioFile!!.absolutePath, bgPath, silentVideoPath
+                    wavAudioPath, bgPath, silentVideoPath
                 ).toBoolean()
 
                 if (isPythonSuccess) {
+                    // ЭТАП 3: Финальный монтаж (Берем видеоряд из Python и накладываем ОРИГИНАЛЬНЫЙ трек)
                     runOnUiThread {
-                        tvGlobalStatus.text = "Шаг 2 из 2: Сведение потоков мультимедиа (FFmpeg)..."
+                        tvGlobalStatus.text = "Шаг 3 из 3: Финальное сведение потоков (FFmpeg)..."
                     }
 
-                    // Наложение звука на видеоряд высокого качества yuv420p
-                    val ffmpegCmd = "-y -i \"$silentVideoPath\" -i \"${selectedAudioFile!!.absolutePath}\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
+                    val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
                     
-                    FFmpegKit.executeAsync(ffmpegCmd) { session ->
+                    com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
                         val returnCode = session.returnCode
                         runOnUiThread {
                             progressBar.visibility = View.GONE
                             btnStart.isEnabled = true
+                            
+                            // Заметаем следы (чистим тяжелый кэш)
+                            File(wavAudioPath).delete()
+                            File(silentVideoPath).delete()
+                            
                             if (returnCode.isValueSuccess) {
-                                tvGlobalStatus.text = "Успех! Файл сохранен в:\n$finalVideoPath"
-                                Toast.makeText(this, "Видео создано!", Toast.LENGTH_LONG).show()
+                                tvGlobalStatus.text = "Готово! Видеоролик сохранен:\n$finalVideoPath"
+                                Toast.makeText(this, "Видео успешно сгенерировано!", Toast.LENGTH_LONG).show()
                             } else {
-                                tvGlobalStatus.text = "Сбой компиляции FFmpeg."
+                                tvGlobalStatus.text = "Сбой финального сведения звука и видео."
                             }
                         }
                     }
@@ -129,18 +154,20 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         progressBar.visibility = View.GONE
                         btnStart.isEnabled = true
-                        tvGlobalStatus.text = "Ошибка синтаксического анализа аудио в Python."
+                        tvGlobalStatus.text = "Сбой алгоритма SciPy при генерации кадров."
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     progressBar.visibility = View.GONE
                     btnStart.isEnabled = true
-                    tvGlobalStatus.text = "Критический сбой: ${e.message}"
+                    tvGlobalStatus.text = "Критическая ошибка: ${e.message}"
                 }
             }
         }.start()
     }
+
+// ... остальной код класса ниже (проверка разрешений) остается прежним ...
 
     // Вспомогательная функция для копирования контента URI во внутренний кэш
     private fun copyUriToCache(uri: Uri, targetFileName: String): File? {

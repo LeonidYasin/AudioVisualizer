@@ -43,8 +43,8 @@ chaquopy {
             install "numpy"
             // ИСПРАВЛЕНО: Используем официальную Android-сборку OpenCV
             install "opencv-python"
-            install "librosa"
-            install "soundfile"
+            // ИСПРАВЛЕНО: Убираем librosa, ставим чистый scipy для математики спектра
+            install "scipy"
         }
     }
 }
