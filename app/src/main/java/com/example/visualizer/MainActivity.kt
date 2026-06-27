@@ -29,6 +29,8 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.Date
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
 
@@ -196,10 +198,8 @@ class MainActivity : AppCompatActivity() {
         val inputAudioPath = selectedAudioFile!!.absolutePath
         val wavAudioPath = File(cacheDir, "temp_mono.wav").absolutePath
         
-        // Временные файлы
         val tempVideoPath = File(cacheDir, "temp_video.avi").absolutePath
         
-        // СОХРАНЯЕМ В DOWNLOADS
         val downloadsDir = getDownloadsFolder()
         if (!downloadsDir.exists()) {
             downloadsDir.mkdirs()
@@ -218,7 +218,7 @@ class MainActivity : AppCompatActivity() {
                 val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
                 
                 if (!preSession.returnCode.isValueSuccess) {
-                    logMessage("❌ Сбой FFmpeg:\n${preSession.allLogsAsString}")
+                    logMessage("❌ Сбой FFmpeg")
                     endProcess()
                     return@Thread
                 }
@@ -244,48 +244,52 @@ class MainActivity : AppCompatActivity() {
                     val tempFile = File(resultPath)
                     if (tempFile.exists()) {
                         val tempSize = tempFile.length() / (1024 * 1024)
-                        logMessage("✅ Рендеринг за ${renderTime}с, промежуточный: ${tempSize} МБ")
+                        logMessage("✅ Рендеринг за ${renderTime}с, размер: ${tempSize} МБ")
 
-                        // ШАГ 3: МАКСИМАЛЬНОЕ СЖАТИЕ В MP4
+                        // ШАГ 3: Сжатие MP4 - СИНХРОННО
                         logMessage("🎬 [3/3] Сжатие MP4...")
                         
-                        // Оптимальные настройки для максимального сжатия при сохранении FullHD
                         val ffmpegMergeCmd = "-y -i \"$resultPath\" -i \"$inputAudioPath\" " +
                                 "-vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
-                                "-c:v libx264 -preset slow -crf 28 -pix_fmt yuv420p " +  // slow = лучшее сжатие, crf 28 = хорошее качество при малом размере
+                                "-c:v libx264 -preset medium -crf 26 -pix_fmt yuv420p " +
                                 "-c:a aac -b:a 128k -shortest -movflags +faststart " +
-                                "-profile:v high -level 4.0 -x264-params \"ref=5:bframes=5:b-adapt=2:direct=auto:me=umh:subme=8:trellis=2:weightb=1:analyse=all:deblock=-1,-1\" " +
                                 "\"$finalVideoPath\""
                         
-                        com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
-                            // Очистка временных файлов
-                            File(wavAudioPath).delete()
-                            tempFile.delete()
+                        // ИСПОЛЬЗУЕМ СИНХРОННЫЙ ВЫЗОВ
+                        val mergeSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegMergeCmd)
+                        
+                        // Очистка временных файлов
+                        File(wavAudioPath).delete()
+                        tempFile.delete()
+                        
+                        if (mergeSession.returnCode.isValueSuccess) {
+                            val finalFile = File(finalVideoPath)
+                            val finalSize = finalFile.length() / (1024 * 1024)
                             
-                            if (session.returnCode.isValueSuccess) {
-                                val finalFile = File(finalVideoPath)
-                                val finalSize = finalFile.length() / (1024 * 1024)
+                            logMessage("\n🎉 ВИДЕО FULLHD ГОТОВО!")
+                            logMessage("📊 Размер: ${finalSize} МБ")
+                            logMessage("📁 Папка: Downloads")
+                            logMessage("📂 Имя: ${finalFile.name}")
+                            logMessage("📂 Путь: $finalVideoPath")
+                            
+                            runOnUiThread {
+                                progressBar.visibility = View.GONE  // Скрываем прогресс
+                                Toast.makeText(
+                                    this@MainActivity, 
+                                    "✅ ${finalFile.name}\n${finalSize} МБ", 
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 
-                                logMessage("\n🎉 ВИДЕО FULLHD ГОТОВО!")
-                                logMessage("📊 Размер: ${finalSize} МБ")
-                                logMessage("📁 Папка: Downloads")
-                                logMessage("📂 Имя: ${finalFile.name}")
-                                
-                                runOnUiThread {
-                                    Toast.makeText(
-                                        this@MainActivity, 
-                                        "✅ ${finalFile.name}\n${finalSize} МБ", 
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    
-                                    // Открываем видео
-                                    openVideoFile(finalFile)
-                                }
-                            } else {
-                                logMessage("❌ Ошибка сборки")
+                                // Открываем видео
+                                openVideoFile(finalFile)
                             }
-                            endProcess()
+                        } else {
+                            logMessage("❌ Ошибка сжатия")
+                            runOnUiThread {
+                                progressBar.visibility = View.GONE
+                            }
                         }
+                        endProcess()
                     } else {
                         logMessage("❌ Файл не найден: $resultPath")
                         endProcess()
@@ -419,7 +423,7 @@ class MainActivity : AppCompatActivity() {
     private fun endProcess() {
         runOnUiThread {
             btnStart.isEnabled = true
-            progressBar.visibility = View.GONE
+            progressBar.visibility = View.GONE  // Скрываем прогресс
             logMessage("🏁 Обработка завершена.")
         }
     }
