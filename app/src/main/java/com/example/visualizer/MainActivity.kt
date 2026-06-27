@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +25,7 @@ import java.util.Date
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var mainScrollView: ScrollView
     private lateinit var tvAudioStatus: TextView
     private lateinit var tvBackgroundStatus: TextView
     private lateinit var tvGlobalStatus: TextView
@@ -33,41 +35,64 @@ class MainActivity : AppCompatActivity() {
     private var selectedAudioFile: File? = null
     private var selectedBgFile: File? = null
 
-    // Лаунчер для открытия продвинутого системного выбора аудио (ACTION_OPEN_DOCUMENT)
+    // Класс перехвата стандартного вывода (print) из Python среды
+    class PythonLogger(private val activity: MainActivity) {
+        private val buffer = StringBuilder()
+
+        @keep // Защита от удаления оптимизатором ProGuard
+        fun write(text: String) {
+            buffer.append(text)
+            val lines = buffer.toString().split("\n")
+            if (lines.size > 1) {
+                for (i in 0 until lines.size - 1) {
+                    val line = lines[i]
+                    if (line.trim().isNotEmpty()) {
+                        activity.runOnUiThread {
+                            activity.appendPythonLog(line)
+                        }
+                    }
+                }
+                buffer.setLength(0)
+                buffer.append(lines.last())
+            }
+        }
+        @keep
+        fun flush() {}
+    }
+
     private val pickAudioLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.data?.let { uri ->
                 val originalName = getFileNameFromUri(uri)
-                logMessage("⏳ Импорт аудио-трека: $originalName")
+                logMessage("⏳ Импорт аудио: $originalName")
                 
                 val file = copyUriToCache(uri, "temp_input_audio.mp3")
                 if (file != null) {
                     selectedAudioFile = file
                     val fileSizeMb = String.format(Locale.US, "%.2f", file.length().toDouble() / (1024 * 1024))
                     tvAudioStatus.text = "$originalName ($fileSizeMb МБ)"
-                    logMessage("✅ Аудио подготовлено к анализу.")
+                    logMessage("✅ Аудио подготовлено.")
                 } else {
-                    logMessage("❌ Ошибка: Не удалось прочитать выбранный аудиофайл.")
+                    logMessage("❌ Ошибка: Не удалось прочитать аудиофайл.")
                 }
             }
         }
     }
 
-    // Лаунчер для открытия продвинутого системного выбора картинок
     private val pickBgLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.data?.let { uri ->
                 val originalName = getFileNameFromUri(uri)
-                logMessage("⏳ Импорт фонового изображения: $originalName")
+                logMessage("⏳ Импорт фона: $originalName")
                 
                 val file = copyUriToCache(uri, "temp_input_bg.jpg")
                 if (file != null) {
                     selectedBgFile = file
                     val fileSizeMb = String.format(Locale.US, "%.2f", file.length().toDouble() / (1024 * 1024))
                     tvBackgroundStatus.text = "$originalName ($fileSizeMb МБ)"
-                    logMessage("✅ Изображение успешно привязано.")
+                    logMessage("✅ Изображение привязано.")
                 } else {
-                    logMessage("❌ Ошибка: Не удалось прочитать выбранное изображение.")
+                    logMessage("❌ Ошибка: Не удалось прочитать изображение.")
                 }
             }
         }
@@ -77,6 +102,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        mainScrollView = findViewById(R.id.mainScrollView)
         tvAudioStatus = findViewById(R.id.tvAudioStatus)
         tvBackgroundStatus = findViewById(R.id.tvBackgroundStatus)
         tvGlobalStatus = findViewById(R.id.tvGlobalStatus)
@@ -87,25 +113,31 @@ class MainActivity : AppCompatActivity() {
         val btnSelectBackground = findViewById<Button>(R.id.btnSelectBackground)
 
         tvGlobalStatus.setTextIsSelectable(true)
-        logMessage("📱 Студия визуализации готова к работе.")
+        logMessage("📱 Студия визуализации запущена.")
 
+        // Запуск Python и перенаправление потоков вывода
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
         }
 
         try {
             val py = Python.getInstance()
+            val sys = py.getModule("sys")
+            val logger = PythonLogger(this)
+            sys.set("stdout", logger)
+            sys.set("stderr", logger)
+            logMessage("⚙️ Системный лог Python успешно подключен.")
+            
             py.getModule("visualizer")
         } catch (e: Exception) {
-            logMessage("⚠️ Ошибка инициализации скрипта: ${e.message}")
+            logMessage("⚠️ Ошибка инициализации скриптов: ${e.message}")
         }
 
-        // Настройка вызова продвинутого SAF-проводника
         btnSelectAudio.setOnClickListener {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "audio/*"
-                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/mpeg", "audio/x-wav", "audio/wav", "audio/mp3"))
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/mpeg", "audio/x-wav", "audio/wav", "audio/mp3", "audio/x-m4a", "audio/m4a"))
             }
             pickAudioLauncher.launch(intent)
         }
@@ -120,7 +152,7 @@ class MainActivity : AppCompatActivity() {
 
         btnStart.setOnClickListener {
             if (selectedAudioFile == null) {
-                logMessage("❌ Ошибка: Не выбран аудиофайл для генерации видео.")
+                logMessage("❌ Ошибка: Не выбран аудиофайл.")
                 return@setOnClickListener
             }
             processVideo()
@@ -132,7 +164,7 @@ class MainActivity : AppCompatActivity() {
         progressBar.visibility = View.VISIBLE
         
         logMessage("\n🚀 =========================================")
-        logMessage("🚀 ЗАПУСК ГЕНЕРАЦИИ МЕДИАРЯДА")
+        logMessage("🚀 ЗАПУСК СГЛАЖИВАНИЯ И МЕДИАРЕНДЕРА")
         logMessage("🚀 =========================================")
 
         val inputAudioPath = selectedAudioFile!!.absolutePath
@@ -143,32 +175,33 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
-                runOnUiThread { logMessage("🎬 [1/3] Декодирование аудиопотока в WAV через FFmpeg...") }
+                runOnUiThread { logMessage("🎬 [1/3] Пережатие аудио в рабочий WAV Mono через FFmpeg...") }
                 val ffmpegPreCmd = "-y -i \"$inputAudioPath\" -ac 1 -ar 22050 \"$wavAudioPath\""
                 val preSession = com.arthenica.ffmpegkit.FFmpegKit.execute(ffmpegPreCmd)
                 
                 if (!preSession.returnCode.isValueSuccess) {
                     runOnUiThread {
-                        logMessage("❌ Ошибка FFmpeg при конвертации аудио:\n${preSession.allLogsAsString}")
+                        logMessage("❌ Сбой FFmpeg декодера:\n${preSession.allLogsAsString}")
                         endProcess()
                     }
                     return@Thread
                 }
                 
-                runOnUiThread { logMessage("✅ Аудио успешно перекодировано в Mono WAV.") }
+                runOnUiThread { logMessage("✅ Аудио подготовлено. Передача управления ядру Python.") }
 
-                runOnUiThread { logMessage("🐍 [2/3] Запуск Python математики (SciPy/OpenCV)...") }
+                runOnUiThread { logMessage("🐍 [2/3] Вызов Python-модуля (SciPy/OpenCV)...") }
                 val py = Python.getInstance()
                 val pyModule = py.getModule("visualizer")
                 
+                // Скрипт будет работать, а все его print() автоматически побегут на экран
                 val isPythonSuccess = pyModule.callAttr(
                     "generate_silent_spectrum",
                     wavAudioPath, bgPath, silentVideoPath
                 ).toBoolean()
 
                 if (isPythonSuccess) {
-                    runOnUiThread { logMessage("✅ Рендеринг видеокадров Python завершил успешно.") }
-                    runOnUiThread { logMessage("🎬 [3/3] Сведение аудио и видеодорожек...") }
+                    runOnUiThread { logMessage("✅ Математический рендер кадров Python завершен.") }
+                    runOnUiThread { logMessage("🎬 [3/3] Сборка финального контейнера (FFmpeg мультиплексор)...") }
 
                     val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
                     
@@ -178,29 +211,29 @@ class MainActivity : AppCompatActivity() {
                             File(silentVideoPath).delete()
                             
                             if (session.returnCode.isValueSuccess) {
-                                logMessage("\n🎉 ВЫПОЛНЕНО УСПЕШНО!")
-                                logMessage("💾 Файл доступен по пути:\n$finalVideoPath")
-                                Toast.makeText(this@MainActivity, "Видео успешно готово!", Toast.LENGTH_LONG).show()
+                                logMessage("\n🎉 ПРОЦЕСС ЗАВЕРШЕН УСПЕШНО!")
+                                logMessage("💾 Сохранено в память устройства:\n$finalVideoPath")
+                                Toast.makeText(this@MainActivity, "Видео готово!", Toast.LENGTH_LONG).show()
                             } else {
-                                logMessage("❌ Ошибка объединения контейнера:\n${session.allLogsAsString}")
+                                logMessage("❌ Ошибка сборки контейнера:\n${session.allLogsAsString}")
                             }
                             endProcess()
                         }
                     }
                 } else {
                     runOnUiThread {
-                        logMessage("❌ Алгоритм Python вернул False. Проверьте параметры скрипта.")
+                        logMessage("❌ Скрипт Python вернул критический флаг False.")
                         endProcess()
                     }
                 }
             } catch (e: PyException) {
                 runOnUiThread {
-                    logMessage("\n💥 ТРЕЙСБЕК ОШИБКИ ИЗ PYTHON:\n${e.message}")
+                    logMessage("\n💥 ТРЕЙСБЕК ОШИБКИ ИЗ PYTHON СРЕДЫ:\n${e.message}")
                     endProcess()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    logMessage("\n💥 СИСТЕМНЫЙ СБОЙ ПРИЛОЖЕНИЯ:\n${Log.getStackTraceString(e)}")
+                    logMessage("\n💥 СИСТЕМНАЯ ОШИБКА АНДРОИД:\n${Log.getStackTraceString(e)}")
                     endProcess()
                 }
             }
@@ -210,15 +243,27 @@ class MainActivity : AppCompatActivity() {
     private fun logMessage(message: String) {
         val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         tvGlobalStatus.append("[$timeStamp] $message\n")
+        scrollToBottom()
+    }
+
+    // Метод вывода чистых логов из недр Python (без дублирования системных меток времени)
+    fun appendPythonLog(line: String) {
+        tvGlobalStatus.append("🐍 >>> $line\n")
+        scrollToBottom()
+    }
+
+    private fun scrollToBottom() {
+        mainScrollView.post {
+            mainScrollView.fullScroll(View.FOCUS_DOWN)
+        }
     }
 
     private fun endProcess() {
         btnStart.isEnabled = true
         progressBar.visibility = View.GONE
-        logMessage("🏁 Операция завершена.")
+        logMessage("🏁 Поток обработки остановлен.")
     }
 
-    // Извлечение настоящего отображаемого имени файла из URI документа
     private fun getFileNameFromUri(uri: Uri): String {
         var name = ""
         if (uri.scheme == "content") {
