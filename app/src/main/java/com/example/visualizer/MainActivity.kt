@@ -10,7 +10,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
-import com.ffmpegkit.FFmpegKit
+// ИСПРАВЛЕНО: Официальный пакет импорта для FFmpegKit
+import com.arthenica.ffmpegkit.FFmpegKit
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import java.io.File
 import java.io.FileOutputStream
