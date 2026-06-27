@@ -216,61 +216,71 @@ class MainActivity : AppCompatActivity() {
                 val pyModule = py.getModule("visualizer")
                 
                 val startTime = System.currentTimeMillis()
-                val resultPath = pyModule.callAttr(
+                // ИСПРАВЛЕНО: Используем toBoolean() вместо asString()
+                val isPythonSuccess = pyModule.callAttr(
                     "create_spectrum_video",
                     wavAudioPath, tempVideoPath, bgPath
-                ).asString()
+                ).toBoolean()
                 
                 val renderTime = (System.currentTimeMillis() - startTime) / 1000
 
-                if (resultPath != "False" && File(resultPath).exists()) {
-                    val tempSize = File(resultPath).length() / (1024 * 1024)
-                    logMessage("✅ Рендеринг завершен за ${renderTime}с")
-                    logMessage("📊 Промежуточный файл: ${tempSize} МБ")
+                if (isPythonSuccess) {
+                    // ИСПРАВЛЕНО: Проверяем существование файла напрямую
+                    val tempFile = File(tempVideoPath)
+                    if (tempFile.exists()) {
+                        val tempSize = tempFile.length() / (1024 * 1024)
+                        logMessage("✅ Рендеринг завершен за ${renderTime}с")
+                        logMessage("📊 Промежуточный файл: ${tempSize} МБ")
 
-                    // ШАГ 3: Финальная сборка MP4 с оптимизацией
-                    logMessage("🎬 [3/3] Сборка MP4...")
-                    
-                    // Оптимальные настройки для FullHD с балансом качество/размер
-                    val ffmpegMergeCmd = "-y -i \"$resultPath\" -i \"$inputAudioPath\" " +
-                            "-vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
-                            "-c:v libx264 -preset medium -crf 22 -pix_fmt yuv420p " +
-                            "-c:a aac -b:a 192k -shortest -movflags +faststart " +
-                            "-profile:v high -level 4.0 \"$finalVideoPath\""
-                    
-                    com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
-                        // Очистка временных файлов
-                        File(wavAudioPath).delete()
-                        File(resultPath).delete()
+                        // ШАГ 3: Финальная сборка MP4 с оптимизацией
+                        logMessage("🎬 [3/3] Сборка MP4...")
                         
-                        if (session.returnCode.isValueSuccess) {
-                            val finalSize = File(finalVideoPath).length() / (1024 * 1024)
-                            logMessage("\n🎉 ВИДЕО FULLHD ГОТОВО!")
-                            logMessage("📊 Размер: ${finalSize} МБ")
-                            logMessage("📁 Сохранено: ${File(finalVideoPath).name}")
-                            logMessage("📂 Путь: $finalVideoPath")
+                        val ffmpegMergeCmd = "-y -i \"$tempVideoPath\" -i \"$inputAudioPath\" " +
+                                "-vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
+                                "-c:v libx264 -preset medium -crf 22 -pix_fmt yuv420p " +
+                                "-c:a aac -b:a 192k -shortest -movflags +faststart " +
+                                "-profile:v high -level 4.0 \"$finalVideoPath\""
+                        
+                        com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
+                            // Очистка временных файлов
+                            File(wavAudioPath).delete()
+                            tempFile.delete()
                             
-                            runOnUiThread {
-                                Toast.makeText(
-                                    this@MainActivity, 
-                                    "FullHD видео готово! ${finalSize} МБ", 
-                                    Toast.LENGTH_LONG
-                                ).show()
+                            if (session.returnCode.isValueSuccess) {
+                                val finalFile = File(finalVideoPath)
+                                val finalSize = finalFile.length() / (1024 * 1024)
+                                logMessage("\n🎉 ВИДЕО FULLHD ГОТОВО!")
+                                logMessage("📊 Размер: ${finalSize} МБ")
+                                logMessage("📁 Сохранено: ${finalFile.name}")
+                                logMessage("📂 Путь: $finalVideoPath")
+                                
+                                runOnUiThread {
+                                    Toast.makeText(
+                                        this@MainActivity, 
+                                        "FullHD видео готово! ${finalSize} МБ", 
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            } else {
+                                logMessage("❌ Ошибка сборки:\n${session.allLogsAsString}")
                             }
-                        } else {
-                            logMessage("❌ Ошибка сборки:\n${session.allLogsAsString}")
+                            endProcess()
                         }
+                    } else {
+                        logMessage("❌ Python сообщил об успехе, но файл не найден: $tempVideoPath")
                         endProcess()
                     }
                 } else {
-                    logMessage("❌ Python вернул ошибку или файл не создан")
+                    logMessage("❌ Python вернул ошибку")
                     endProcess()
                 }
             } catch (e: PyException) {
                 logMessage("\n💥 ОШИБКА PYTHON:\n${e.message}")
+                e.printStackTrace()
                 endProcess()
             } catch (e: Exception) {
                 logMessage("\n💥 СИСТЕМНАЯ ОШИБКА:\n${Log.getStackTraceString(e)}")
+                e.printStackTrace()
                 endProcess()
             }
         }.start()
