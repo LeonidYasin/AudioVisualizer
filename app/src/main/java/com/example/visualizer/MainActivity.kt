@@ -16,6 +16,7 @@ import com.google.android.material.progressindicator.LinearProgressIndicator
 import java.io.File
 import java.io.FileOutputStream
 
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvAudioStatus: TextView
@@ -26,6 +27,22 @@ class MainActivity : AppCompatActivity() {
 
     private var selectedAudioFile: File? = null
     private var selectedBgFile: File? = null
+	
+	private fun copyUriToCache(uri: Uri, targetFileName: String): File? {
+    return try {
+        val inputStream = contentResolver.openInputStream(uri) ?: return null
+        val outputFile = File(cacheDir, targetFileName)
+        inputStream.use { input ->
+            FileOutputStream(outputFile).use { output ->
+                input.copyTo(output)
+            }
+        }
+        outputFile
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
 
     // Регистрируем лаунчеры для безопасного выбора медиафайлов через SAF
     private val pickAudioLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
