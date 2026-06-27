@@ -1,102 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/mainScrollView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true"
-    android:background="#0F172A"> <LinearLayout
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#F4F6F9">
+
+    <Button
+        android:id="@+id/btnSelectAudio"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
+        android:text="Выбрать аудиофайл"
+        android:textAllCaps="false" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Audio Visualizer Studio"
-            android:textColor="#F8FAFC"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:layout_marginBottom="28dp"/>
+    <TextView
+        android:id="@+id/tvAudioStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Аудиофайл не выбран"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="8dp"
+        android:textColor="#5A6B7C"
+        android:textSize="13sp" />
 
-        <Button
-            android:id="@+id/btnSelectAudio"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="ВЫБРАТЬ АУДИОЗАПИСЬ"
-            android:backgroundTint="#334155"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:padding="14dp"
-            app:cornerRadius="8dp" />
+    <Button
+        android:id="@+id/btnSelectBackground"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Выбрать фоновое изображение"
+        android:textAllCaps="false" />
 
-        <TextView
-            android:id="@+id/tvAudioStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Аудио не выбрано"
-            android:textColor="#94A3B8"
-            android:gravity="center"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="20dp" />
+    <TextView
+        android:id="@+id/tvBackgroundStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Фон по умолчанию (темный спектр)"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="12dp"
+        android:textColor="#5A6B7C"
+        android:textSize="13sp" />
 
-        <Button
-            android:id="@+id/btnSelectBackground"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="ВЫБРАТЬ ФОНОВОЕ ИЗОБРАЖЕНИЕ"
-            android:backgroundTint="#334155"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:padding="14dp"
-            app:cornerRadius="8dp" />
+    <Button
+        android:id="@+id/btnStart"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Запустить рендеринг спектра"
+        android:backgroundTint="#00E676"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:textAllCaps="false" />
 
-        <TextView
-            android:id="@+id/tvBackgroundStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Фон не выбран (будет черный экран)"
-            android:textColor="#94A3B8"
-            android:gravity="center"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="24dp" />
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/progressBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:indeterminate="true"
+        android:visibility="gone"
+        app:trackColor="#E0E0E0"
+        app:indicatorColor="#00E676" />
 
-        <com.google.android.material.progressindicator.LinearProgressIndicator
-            android:id="@+id/progressBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:indeterminate="true"
-            android:visibility="gone"
-            android:layout_marginBottom="16dp"
-            app:indicatorColor="#38BDF8"/>
+    <ScrollView
+        android:id="@+id/mainScrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp"
+        android:background="#0C0C0C"
+        android:elevation="4dp"
+        android:padding="10dp">
 
         <TextView
             android:id="@+id/tvGlobalStatus"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:minHeight="260dp"
-            android:background="#1E293B"
-            android:padding="14dp"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:fontFamily="monospace"
-            android:gravity="start|top"
-            android:layout_marginBottom="20dp"/>
-
-        <Button
-            android:id="@+id/btnStart"
-            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="СОЗДАТЬ ВИДЕОРОЛИК"
-            android:backgroundTint="#0284C7"
-            android:textColor="#FFFFFF"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:padding="16dp"
-            app:cornerRadius="8dp" />
+            android:fontFamily="monospace"
+            android:lineSpacingMultiplier="1.2"
+            android:textColor="#00FF66"
+            android:textSize="12sp"
+            android:textIsSelectable="true" />
+    </ScrollView>
 
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>

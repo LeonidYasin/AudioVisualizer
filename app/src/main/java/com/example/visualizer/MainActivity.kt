@@ -2,6 +2,7 @@ package com.example.visualizer
 
 import android.app.Activity
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -42,6 +43,9 @@ class MainActivity : AppCompatActivity() {
     private val pendingPythonLogs = StringBuilder()
     private val uiHandler = Handler(Looper.getMainLooper())
     @Volatile private var isLogUpdateScheduled = false
+
+    // Интеллектуальный флаг автоскролла
+    private var autoScrollEnabled = true
 
     // Класс перехвата стандартного вывода (print) из Python среды
     class PythonLogger(private val activity: MainActivity) {
@@ -111,6 +115,16 @@ class MainActivity : AppCompatActivity() {
         tvGlobalStatus.setTextIsSelectable(true)
         logMessage("📱 Студия визуализации запущена.")
 
+        // Отслеживание скролла: определяет, читает ли юзер старые логи или находится внизу
+        mainScrollView.viewTreeObserver.addOnScrollChangedListener {
+            val child = mainScrollView.getChildAt(0)
+            if (child != null) {
+                val maxScrollY = child.height - mainScrollView.height
+                // Если разница текущего скролла и дна менее 150px (или контент умещается целиком) -> автоскролл активен
+                autoScrollEnabled = (maxScrollY - mainScrollView.scrollY) <= 150 || maxScrollY <= 0
+            }
+        }
+
         // Инициализация Python платформы
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
@@ -128,7 +142,7 @@ class MainActivity : AppCompatActivity() {
             
             py.getModule("visualizer")
         } catch (e: Exception) {
-            logMessage("⚠️ Ошибка инициализации скриптов: ${e.message}")
+            logMessage("⚠️ Ошибка初始化 скриптов: ${e.message}")
         }
 
         btnSelectAudio.setOnClickListener {
@@ -157,6 +171,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Обработка поворота экрана БЕЗ перезапуска Activity (использует текущие флаги автоскролла)
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (autoScrollEnabled) {
+            // Небольшая задержка, чтобы дать TextView перерасчитать новую геометрию и высоту строк
+            mainScrollView.postDelayed({
+                mainScrollView.fullScroll(View.FOCUS_DOWN)
+            }, 200)
+        }
+    }
+
     private fun processVideo() {
         btnStart.isEnabled = false
         progressBar.visibility = View.VISIBLE
@@ -167,8 +192,6 @@ class MainActivity : AppCompatActivity() {
 
         val inputAudioPath = selectedAudioFile!!.absolutePath
         val wavAudioPath = File(cacheDir, "temp_mono.wav").absolutePath
-        
-        // ИСПРАВЛЕНО: Изменено расширение на .avi для поддержки кодека MJPG в OpenCV
         val silentVideoPath = File(cacheDir, "silent_temp.avi").absolutePath
         val finalVideoPath = File(getExternalFilesDir(null), "Спектр_${System.currentTimeMillis()}.mp4").absolutePath
         val bgPath = selectedBgFile?.absolutePath ?: ""
@@ -200,7 +223,6 @@ class MainActivity : AppCompatActivity() {
                     logMessage("✅ Математический рендер кадров Python завершен.")
                     logMessage("🎬 [3/3] Сборка финального контейнера (FFmpeg мультиплексор)...")
 
-                    // FFmpeg без проблем пережмет входящий MJPEG AVI в итоговый H.264 MP4
                     val ffmpegMergeCmd = "-y -i \"$silentVideoPath\" -i \"$inputAudioPath\" -c:v libx264 -crf 23 -pix_fmt yuv420p -c:a aac -shortest \"$finalVideoPath\""
                     
                     com.arthenica.ffmpegkit.FFmpegKit.executeAsync(ffmpegMergeCmd) { session ->
@@ -295,8 +317,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scrollToBottom() {
-        mainScrollView.post {
-            mainScrollView.fullScroll(View.FOCUS_DOWN)
+        if (autoScrollEnabled) {
+            mainScrollView.post {
+                mainScrollView.fullScroll(View.FOCUS_DOWN)
+            }
         }
     }
 
